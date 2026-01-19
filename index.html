@@ -99,47 +99,48 @@
             { version: 'v1', name: 'gemini-pro' } // 最終手段
         ];
 
-        async function summarizeWithFallback() {
-            const apiKey = localStorage.getItem('gemini_api_key');
-            const text = document.getElementById('rawText').value;
-            if (!apiKey) return alert("APIキーを登録してください");
-            if (!text) return alert("内容を入力してください");
+        // --- AI接続（最も標準的な成功例が多い形式） ---
+async function summarizeWithFallback() {
+    const apiKey = localStorage.getItem('gemini_api_key');
+    const text = document.getElementById('rawText').value;
+    if (!apiKey) return alert("APIキーを登録してください");
+    if (!text) return alert("内容を入力してください");
 
-            const btn = document.getElementById('aiBtn');
-            const statusMsg = document.getElementById('statusMsg');
-            
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> AI思考中...';
+    const btn = document.getElementById('aiBtn');
+    btn.disabled = true;
+    btn.innerHTML = '整形中...';
 
-            let finalResult = null;
-            let lastError = null;
+    try {
+        // モデル名を gemini-1.5-flash に固定し、URLを最も安定している v1beta に設定
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [{ text: "あなたは薬剤師です。次の内容を医師への疑義照会文にしてください。挨拶は不要です。\n内容：" + text }]
+                }]
+            })
+        });
 
-            // 候補リストを順番に試すループ
-            for (const model of MODEL_CANDIDATES) {
-                statusMsg.innerText = `接続試行中: ${model.name}...`;
-                try {
-                    const result = await callGeminiAPI(apiKey, text, model.version, model.name);
-                    finalResult = result;
-                    statusMsg.innerText = `成功 (${model.name})`;
-                    break; // 成功したらループを抜ける
-                } catch (e) {
-                    console.log(`失敗: ${model.name} - ${e.message}`);
-                    lastError = e;
-                    // 次のモデルへ
-                }
-            }
+        const data = await response.json();
 
-            if (finalResult) {
-                document.getElementById('summaryText').value = finalResult;
-            } else {
-                alert("すべてのAIモデル接続に失敗しました。\nAPIキーが正しいか確認してください。\n詳細: " + lastError.message);
-                statusMsg.innerText = "エラー発生";
-            }
-
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-magic"></i> AIが疑義照会文を作成';
+        if (data.error) {
+            // ここでエラーが出た場合、その理由を詳しく表示します
+            throw new Error(data.error.message + " (コード: " + data.error.status + ")");
         }
 
+        const aiResult = data.candidates[0].content.parts[0].text;
+        document.getElementById('summaryText').value = aiResult.trim();
+
+    } catch (e) {
+        alert("AIエラー発生: " + e.message + "\n\n【対策】APIキーを新しく作り直して、貼り付け直してみてください。");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-magic"></i> AIが疑義照会文を作成';
+    }
+}
         // 実際にAPIを呼ぶ関数
         async function callGeminiAPI(apiKey, text, version, modelName) {
             const url = `https://generativelanguage.googleapis.com/${version}/models/${modelName}:generateContent?key=${apiKey}`;
@@ -184,3 +185,4 @@
     </script>
 </body>
 </html>
+
