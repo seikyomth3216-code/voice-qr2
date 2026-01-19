@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI要約 & QR (薬剤師プロンプト内蔵版)</title>
+    <title>AI要約 & QR (v2.1)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -57,11 +57,10 @@
     </div>
 
     <script>
-        // 設定読み込み
         document.addEventListener('DOMContentLoaded', () => {
             const key = localStorage.getItem('gemini_api_key');
-            if (!key) document.getElementById('settingsArea').classList.remove('hidden');
-            else document.getElementById('apiKeyInput').value = key;
+            if (key) document.getElementById('apiKeyInput').value = key;
+            else document.getElementById('settingsArea').classList.remove('hidden');
         });
 
         function toggleSettings() { document.getElementById('settingsArea').classList.toggle('hidden'); }
@@ -73,7 +72,6 @@
             alert("APIキーを保存しました。");
         }
 
-        // 音声認識
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
         if (SpeechRecognition) {
@@ -87,7 +85,6 @@
         }
         function toggleMic() { if(!recognition) return alert("非対応ブラウザです"); recognition.start(); }
 
-        // --- AI要約 (Gemini API 1.5 Flash) ---
         async function summarizeWithGemini() {
             const apiKey = localStorage.getItem('gemini_api_key');
             const text = document.getElementById('rawText').value;
@@ -99,21 +96,17 @@
             btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> 整形中...';
 
             try {
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+                // URLを v1beta から v1 (安定版) に変更しました
+                const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
                 
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        // ★ここがプロンプトエンジニアリングのポイント！
-                        // AIに対する「役割」と「命令」をシステム指示として内蔵しています
-                        system_instruction: {
-                            parts: {
-                                text: "あなたは優秀な薬剤師です。入力された音声を、医師への疑義照会として適切な、簡潔で失礼のない文章に要約・整形してください。挨拶や『承知しました』等の返答は一切不要です。照会文の本文のみを回答してください。"
-                            }
-                        },
                         contents: [{
-                            parts: [{ text: "整形対象のメモ内容: " + text }]
+                            parts: [{ 
+                                text: "あなたは優秀な薬剤師です。入力された音声メモの内容を元に、医師への疑義照会として適切な、簡潔で失礼のない文章に整形してください。挨拶や余計な説明は省き、本文のみを出力してください。 \nメモ内容: " + text 
+                            }]
                         }]
                     })
                 });
