@@ -3,14 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI要約 & QR (自動修復版)</title>
+    <title>AI要約 & QR (自動検知版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
         body { background-color: #f0f9ff; font-family: sans-serif; }
-        .mic-active { color: #ef4444; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
         .loading-spin { animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
@@ -31,33 +29,27 @@
     <div class="w-full bg-white rounded-2xl shadow-xl p-5 mb-6 border border-blue-50">
         <label class="block text-xs font-black text-slate-400 mb-2">① 音声メモを録る</label>
         <div class="relative mb-4">
-            <textarea id="rawText" class="w-full h-24 p-3 bg-slate-50 rounded-xl border border-slate-200 text-slate-600 text-sm resize-none" placeholder="例：残薬が多いのでアムロジピンを削除したいと患者さんが言っている"></textarea>
-            <button onclick="toggleMic()" id="micBtn" class="absolute right-2 bottom-2 bg-blue-500 text-white w-10 h-10 rounded-full shadow-md flex items-center justify-center transition-all active:scale-90">
+            <textarea id="rawText" class="w-full h-24 p-3 bg-slate-50 rounded-xl border border-slate-200 text-slate-600 text-sm resize-none" placeholder="内容を入力してください"></textarea>
+            <button onclick="toggleMic()" id="micBtn" class="absolute right-2 bottom-2 bg-blue-500 text-white w-10 h-10 rounded-full shadow-md flex items-center justify-center transition-all">
                 <i id="micIcon" class="fas fa-microphone"></i>
             </button>
         </div>
 
-        <button onclick="summarizeWithFallback()" id="aiBtn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-black shadow-lg active:scale-95 transition-all mb-4 flex items-center justify-center gap-2">
+        <button onclick="smartSummarize()" id="aiBtn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-black shadow-lg active:scale-95 transition-all mb-4 flex items-center justify-center gap-2">
             <i class="fas fa-magic"></i> AIが疑義照会文を作成
         </button>
-        <p id="statusMsg" class="text-xs text-center text-blue-500 h-4 mb-2"></p>
+        <p id="statusMsg" class="text-[10px] text-center text-blue-400 h-4 mb-2 italic"></p>
 
         <label class="block text-xs font-black text-slate-400 mb-2">② 医師への照会文（AI作成）</label>
-        <textarea id="summaryText" class="w-full h-32 p-3 bg-white rounded-xl border-2 border-blue-400 text-lg font-bold text-slate-800 resize-none shadow-inner mb-4" placeholder="AIが整形した文章が表示されます"></textarea>
+        <textarea id="summaryText" class="w-full h-32 p-3 bg-white rounded-xl border-2 border-blue-400 text-lg font-bold text-slate-800 resize-none shadow-inner mb-4"></textarea>
 
-        <button onclick="generateQR()" class="w-full bg-slate-800 text-white py-4 rounded-xl font-black shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
+        <button onclick="generateQR()" class="w-full bg-slate-800 text-white py-4 rounded-xl font-black shadow-lg flex items-center justify-center gap-2">
             <i class="fas fa-qrcode"></i> QRコードを表示
         </button>
     </div>
 
-    <div id="qrModal" class="fixed inset-0 bg-black/80 hidden flex-col items-center justify-center z-50 p-4" onclick="closeQR()">
-        <div class="bg-white p-8 rounded-3xl flex flex-col items-center" onclick="event.stopPropagation()">
-            <div id="qrcode"></div>
-            <button onclick="closeQR()" class="mt-6 bg-slate-100 px-6 py-2 rounded-full font-bold">閉じる</button>
-        </div>
-    </div>
-
     <script>
+        // 基本設定
         document.addEventListener('DOMContentLoaded', () => {
             const key = localStorage.getItem('gemini_api_key');
             if (key) document.getElementById('apiKeyInput').value = key;
@@ -67,122 +59,91 @@
         function toggleSettings() { document.getElementById('settingsArea').classList.toggle('hidden'); }
         function saveApiKey() {
             const key = document.getElementById('apiKeyInput').value.trim();
-            if (!key) return alert("キーを入力してください");
             localStorage.setItem('gemini_api_key', key);
             document.getElementById('settingsArea').classList.add('hidden');
-            alert("APIキーを保存しました。");
+            alert("APIキーを保存しました");
         }
 
+        // 音声認識
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
         if (SpeechRecognition) {
             recognition = new SpeechRecognition();
             recognition.lang = 'ja-JP';
-            recognition.onstart = () => { document.getElementById('micIcon').classList.add('mic-active'); };
-            recognition.onend = () => { document.getElementById('micIcon').classList.remove('mic-active'); };
-            recognition.onresult = (e) => {
-                document.getElementById('rawText').value += (document.getElementById('rawText').value ? " " : "") + e.results[0][0].transcript;
-            };
+            recognition.onresult = (e) => { document.getElementById('rawText').value += e.results[0][0].transcript; };
         }
-        function toggleMic() { if(!recognition) return alert("非対応ブラウザです"); recognition.start(); }
+        function toggleMic() { recognition && recognition.start(); }
 
-        // --- AI接続（最強の頑丈バージョン） ---
-        
-        // 試行するモデルのリスト（上から順に試します）
-        // 1. 最新のFlash (v1beta)
-        // 2. 安定版のFlash (v1beta)
-        // 3. 古いが最も安定しているPro (v1)
-        const MODEL_CANDIDATES = [
-            { version: 'v1beta', name: 'gemini-1.5-flash' },
-            { version: 'v1beta', name: 'gemini-1.5-flash-latest' },
-            { version: 'v1beta', name: 'gemini-1.5-flash-001' },
-            { version: 'v1', name: 'gemini-pro' } // 最終手段
-        ];
+        // --- スマート要約エンジン（自動検知） ---
+        async function smartSummarize() {
+            const apiKey = localStorage.getItem('gemini_api_key');
+            const text = document.getElementById('rawText').value;
+            if (!apiKey || !text) return alert("キーと内容を確認してください");
 
-        // --- AI接続（最も標準的な成功例が多い形式） ---
-async function summarizeWithFallback() {
-    const apiKey = localStorage.getItem('gemini_api_key');
-    const text = document.getElementById('rawText').value;
-    if (!apiKey) return alert("APIキーを登録してください");
-    if (!text) return alert("内容を入力してください");
+            const btn = document.getElementById('aiBtn');
+            const status = document.getElementById('statusMsg');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> 接続中...';
 
-    const btn = document.getElementById('aiBtn');
-    btn.disabled = true;
-    btn.innerHTML = '整形中...';
+            try {
+                // 手順1: 利用可能なモデルをリストアップする
+                status.innerText = "利用可能なAIを探しています...";
+                const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+                const listRes = await fetch(listUrl);
+                const listData = await listRes.json();
 
-    try {
-        // モデル名を gemini-1.5-flash に固定し、URLを最も安定している v1beta に設定
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-        
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{
-                    parts: [{ text: "あなたは薬剤師です。次の内容を医師への疑義照会文にしてください。挨拶は不要です。\n内容：" + text }]
-                }]
-            })
-        });
+                if (!listRes.ok) throw new Error("APIキーが無効、または制限されています。再度取得し直してください。");
 
-        const data = await response.json();
+                // 手順2: リストの中から「flash」という名前が含まれるモデルを自動で見つける
+                const bestModel = listData.models.find(m => m.name.includes('flash') && m.supportedGenerationMethods.includes('generateContent'));
+                
+                if (!bestModel) throw new Error("利用可能なFlashモデルが見つかりませんでした。");
+                
+                const modelName = bestModel.name; // 例: "models/gemini-1.5-flash"
+                status.innerText = `AI起動: ${modelName.split('/').pop()}...`;
 
-        if (data.error) {
-            // ここでエラーが出た場合、その理由を詳しく表示します
-            throw new Error(data.error.message + " (コード: " + data.error.status + ")");
-        }
+                // 手順3: 見つかったモデルを使って要約を実行
+                const genUrl = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`;
+                const prompt = `あなたは優秀な薬剤師です。次の[音声メモ]を医師への疑義照会として適切な簡潔で失礼のない文章に書き換えてください。本文のみを出力してください。\n\n[音声メモ]: ${text}`;
 
-        const aiResult = data.candidates[0].content.parts[0].text;
-        document.getElementById('summaryText').value = aiResult.trim();
+                const genRes = await fetch(genUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
 
-    } catch (e) {
-        alert("AIエラー発生: " + e.message + "\n\n【対策】APIキーを新しく作り直して、貼り付け直してみてください。");
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-magic"></i> AIが疑義照会文を作成';
-    }
-}
-        // 実際にAPIを呼ぶ関数
-        async function callGeminiAPI(apiKey, text, version, modelName) {
-            const url = `https://generativelanguage.googleapis.com/${version}/models/${modelName}:generateContent?key=${apiKey}`;
-            
-            const prompt = `あなたは優秀な薬剤師です。次の[音声メモ]の内容を、医師への疑義照会として適切な、簡潔で失礼のない文章に書き換えてください。挨拶や返事は不要で、本文のみを出力してください。\n\n[音声メモ]: ${text}`;
+                const genData = await genRes.json();
+                if (genData.error) throw new Error(genData.error.message);
 
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{
-                        parts: [{ text: prompt }]
-                    }]
-                })
-            });
+                document.getElementById('summaryText').value = genData.candidates[0].content.parts[0].text.trim();
+                status.innerText = "作成完了";
 
-            const data = await response.json();
-
-            if (!response.ok) {
-                // エラー詳細を取得
-                const errorMsg = data.error ? data.error.message : response.statusText;
-                throw new Error(errorMsg);
+            } catch (e) {
+                console.error(e);
+                alert("【エラー】\n" + e.message);
+                status.innerText = "エラー";
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-magic"></i> AIが疑義照会文を作成';
             }
-
-            if (!data.candidates || data.candidates.length === 0) {
-                throw new Error("回答が空でした");
-            }
-
-            return data.candidates[0].content.parts[0].text.trim();
         }
 
         function generateQR() {
             const text = document.getElementById('summaryText').value;
-            if(!text) return alert("要約結果がありません");
-            const qrDiv = document.getElementById('qrcode');
-            qrDiv.innerHTML = "";
-            new QRCode(qrDiv, { text: encodeURIComponent(text), width: 256, height: 256 });
+            if(!text) return;
+            document.getElementById('qrcode').innerHTML = "";
+            new QRCode(document.getElementById('qrcode'), { text: encodeURIComponent(text), width: 256, height: 256 });
             document.getElementById('qrModal').classList.remove('hidden');
             document.getElementById('qrModal').classList.add('flex');
         }
         function closeQR() { document.getElementById('qrModal').classList.add('hidden'); }
     </script>
+    
+    <div id="qrModal" class="fixed inset-0 bg-black/80 hidden flex-col items-center justify-center z-50 p-4" onclick="closeQR()">
+        <div class="bg-white p-8 rounded-3xl flex flex-col items-center" onclick="event.stopPropagation()">
+            <div id="qrcode"></div>
+            <button onclick="closeQR()" class="mt-6 bg-slate-100 px-6 py-2 rounded-full font-bold">閉じる</button>
+        </div>
+    </div>
 </body>
 </html>
-
