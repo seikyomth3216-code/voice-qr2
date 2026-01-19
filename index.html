@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI要約 & QR (修正完了版)</title>
+    <title>AI要約 & QR (自動修復版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -37,9 +37,10 @@
             </button>
         </div>
 
-        <button onclick="summarizeWithGemini()" id="aiBtn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-black shadow-lg active:scale-95 transition-all mb-4 flex items-center justify-center gap-2">
+        <button onclick="summarizeWithFallback()" id="aiBtn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-black shadow-lg active:scale-95 transition-all mb-4 flex items-center justify-center gap-2">
             <i class="fas fa-magic"></i> AIが疑義照会文を作成
         </button>
+        <p id="statusMsg" class="text-xs text-center text-blue-500 h-4 mb-2"></p>
 
         <label class="block text-xs font-black text-slate-400 mb-2">② 医師への照会文（AI作成）</label>
         <textarea id="summaryText" class="w-full h-32 p-3 bg-white rounded-xl border-2 border-blue-400 text-lg font-bold text-slate-800 resize-none shadow-inner mb-4" placeholder="AIが整形した文章が表示されます"></textarea>
@@ -85,56 +86,89 @@
         }
         function toggleMic() { if(!recognition) return alert("非対応ブラウザです"); recognition.start(); }
 
-        async function summarizeWithGemini() {
+        // --- AI接続（最強の頑丈バージョン） ---
+        
+        // 試行するモデルのリスト（上から順に試します）
+        // 1. 最新のFlash (v1beta)
+        // 2. 安定版のFlash (v1beta)
+        // 3. 古いが最も安定しているPro (v1)
+        const MODEL_CANDIDATES = [
+            { version: 'v1beta', name: 'gemini-1.5-flash' },
+            { version: 'v1beta', name: 'gemini-1.5-flash-latest' },
+            { version: 'v1beta', name: 'gemini-1.5-flash-001' },
+            { version: 'v1', name: 'gemini-pro' } // 最終手段
+        ];
+
+        async function summarizeWithFallback() {
             const apiKey = localStorage.getItem('gemini_api_key');
             const text = document.getElementById('rawText').value;
             if (!apiKey) return alert("APIキーを登録してください");
             if (!text) return alert("内容を入力してください");
 
             const btn = document.getElementById('aiBtn');
+            const statusMsg = document.getElementById('statusMsg');
+            
             btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> 整形中...';
+            btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> AI思考中...';
 
-            try {
-                // 【修正箇所】URLを v1beta に戻し、モデル名を指定
-                // エラー対策として最も安定したモデル gemini-1.5-flash-latest を使用します
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
-                
-                // 【修正箇所】システム指示（system_instruction）を使わず、
-                // 普通のメッセージの中に「役割」を混ぜる方式に変更（これが一番エラーが出ません）
-                const prompt = `あなたは優秀な薬剤師です。次の[音声メモ]の内容を、医師への疑義照会として適切な、簡潔で失礼のない文章に書き換えてください。挨拶や返事は不要で、本文のみを出力してください。\n\n[音声メモ]: ${text}`;
+            let finalResult = null;
+            let lastError = null;
 
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{
-                            parts: [{ text: prompt }]
-                        }]
-                    })
-                });
-
-                const data = await response.json();
-                
-                // エラー詳細をキャッチして表示しやすくする
-                if (data.error) {
-                    console.error(data.error);
-                    throw new Error(data.error.message);
+            // 候補リストを順番に試すループ
+            for (const model of MODEL_CANDIDATES) {
+                statusMsg.innerText = `接続試行中: ${model.name}...`;
+                try {
+                    const result = await callGeminiAPI(apiKey, text, model.version, model.name);
+                    finalResult = result;
+                    statusMsg.innerText = `成功 (${model.name})`;
+                    break; // 成功したらループを抜ける
+                } catch (e) {
+                    console.log(`失敗: ${model.name} - ${e.message}`);
+                    lastError = e;
+                    // 次のモデルへ
                 }
-                
-                if (!data.candidates || data.candidates.length === 0) {
-                     throw new Error("AIからの応答が空でした。もう一度試してください。");
-                }
-
-                const aiResult = data.candidates[0].content.parts[0].text;
-                document.getElementById('summaryText').value = aiResult.trim();
-
-            } catch (e) {
-                alert("AIエラー: " + e.message);
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-magic"></i> AIが疑義照会文を作成';
             }
+
+            if (finalResult) {
+                document.getElementById('summaryText').value = finalResult;
+            } else {
+                alert("すべてのAIモデル接続に失敗しました。\nAPIキーが正しいか確認してください。\n詳細: " + lastError.message);
+                statusMsg.innerText = "エラー発生";
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-magic"></i> AIが疑義照会文を作成';
+        }
+
+        // 実際にAPIを呼ぶ関数
+        async function callGeminiAPI(apiKey, text, version, modelName) {
+            const url = `https://generativelanguage.googleapis.com/${version}/models/${modelName}:generateContent?key=${apiKey}`;
+            
+            const prompt = `あなたは優秀な薬剤師です。次の[音声メモ]の内容を、医師への疑義照会として適切な、簡潔で失礼のない文章に書き換えてください。挨拶や返事は不要で、本文のみを出力してください。\n\n[音声メモ]: ${text}`;
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [{ text: prompt }]
+                    }]
+                })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                // エラー詳細を取得
+                const errorMsg = data.error ? data.error.message : response.statusText;
+                throw new Error(errorMsg);
+            }
+
+            if (!data.candidates || data.candidates.length === 0) {
+                throw new Error("回答が空でした");
+            }
+
+            return data.candidates[0].content.parts[0].text.trim();
         }
 
         function generateQR() {
