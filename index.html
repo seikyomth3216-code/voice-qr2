@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI要約 & QR (v2.1)</title>
+    <title>AI要約 & QR (修正完了版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -96,24 +96,36 @@
             btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> 整形中...';
 
             try {
-                // URLを v1beta から v1 (安定版) に変更しました
-                const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+                // 【修正箇所】URLを v1beta に戻し、モデル名を指定
+                // エラー対策として最も安定したモデル gemini-1.5-flash-latest を使用します
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
                 
+                // 【修正箇所】システム指示（system_instruction）を使わず、
+                // 普通のメッセージの中に「役割」を混ぜる方式に変更（これが一番エラーが出ません）
+                const prompt = `あなたは優秀な薬剤師です。次の[音声メモ]の内容を、医師への疑義照会として適切な、簡潔で失礼のない文章に書き換えてください。挨拶や返事は不要で、本文のみを出力してください。\n\n[音声メモ]: ${text}`;
+
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         contents: [{
-                            parts: [{ 
-                                text: "あなたは優秀な薬剤師です。入力された音声メモの内容を元に、医師への疑義照会として適切な、簡潔で失礼のない文章に整形してください。挨拶や余計な説明は省き、本文のみを出力してください。 \nメモ内容: " + text 
-                            }]
+                            parts: [{ text: prompt }]
                         }]
                     })
                 });
 
                 const data = await response.json();
-                if (data.error) throw new Error(data.error.message);
                 
+                // エラー詳細をキャッチして表示しやすくする
+                if (data.error) {
+                    console.error(data.error);
+                    throw new Error(data.error.message);
+                }
+                
+                if (!data.candidates || data.candidates.length === 0) {
+                     throw new Error("AIからの応答が空でした。もう一度試してください。");
+                }
+
                 const aiResult = data.candidates[0].content.parts[0].text;
                 document.getElementById('summaryText').value = aiResult.trim();
 
