@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>薬剤師AI要約くん Ver.2.5</title>
+    <title>薬剤師AI要約くん Ver.2.6</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
     <style>
         body { background-color: #f8fafc; font-family: sans-serif; }
         .loading-spin { animation: spin 1s linear infinite; }
@@ -23,7 +23,7 @@
     <div class="w-full flex justify-between items-center mb-4">
         <div>
             <h1 class="text-xl font-black italic text-blue-800"><i class="fas fa-prescription mr-2"></i>薬剤師用AI要約</h1>
-            <p class="text-[10px] font-bold text-slate-400">Version 2.5 (構造化・実務特化版)</p>
+            <p class="text-[10px] font-bold text-slate-400">Version 2.6 (QR修正・構造化版)</p>
         </div>
         <button onclick="toggleSettings()" class="text-blue-600 p-2"><i class="fas fa-key text-xl"></i></button>
     </div>
@@ -66,7 +66,7 @@
             </button>
         </div>
 
-        <button onclick="generateQR()" class="w-full bg-slate-800 text-white py-4 rounded-xl font-black shadow-lg flex items-center justify-center gap-2">
+        <button onclick="generateQR()" id="qrBtn" class="w-full bg-slate-800 text-white py-4 rounded-xl font-black shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all">
             <i class="fas fa-qrcode"></i> QRコードを表示
         </button>
     </div>
@@ -111,7 +111,6 @@
             btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> 整形中...';
 
             try {
-                // モデルリストからFlashモデルを動的に取得
                 const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
                 const listRes = await fetch(listUrl);
                 const listData = await listRes.json();
@@ -120,7 +119,6 @@
                 
                 const genUrl = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`;
 
-                // 【プロンプト変更】構造化・機械的箇条書きを徹底
                 const prompt = `あなたは臨床に精通した薬剤師です。次の[音声メモ]を、多忙な医師が即座に理解できるよう、機械的な構造化フォーマットで出力してください。丁寧な挨拶や文章表現、前置きは一切不要です。
 必ず以下の2点のみを出力してください。
 
@@ -139,7 +137,6 @@
                 if (genData.error) throw new Error(genData.error.message);
 
                 let result = genData.candidates[0].content.parts[0].text.trim();
-                // 余計な記号（Markdownのバッククォート等）を除去
                 result = result.replace(/```/g, '');
 
                 document.getElementById('summaryText').value = result;
@@ -154,30 +151,52 @@
             }
         }
 
+        // --- 日本語対応版QR生成ロジック ---
         function generateQR() {
-            const text = document.getElementById('summaryText').value;
-            if(!text) return;
-            document.getElementById('qrcode').innerHTML = "";
+            const text = document.getElementById('summaryText').value.trim();
+            if(!text) {
+                alert("要約文が空です。AIボタンで文章を作成してください。");
+                return;
+            }
+
+            const qrContainer = document.getElementById('qrcode');
+            qrContainer.innerHTML = ""; // 初期化
             
-            // 修正：encodeURIComponentを外し、そのままのテキストを渡す
-            new QRCode(document.getElementById('qrcode'), {
-                text: text, 
-                width: 256,
-                height: 256,
-                correctLevel : QRCode.CorrectLevel.H
-            });
-            
-            document.getElementById('qrModal').classList.remove('hidden');
-            document.getElementById('qrModal').classList.add('flex');
+            try {
+                // 日本語（UTF-8）を正しく扱うためのエスケープ処理
+                // qrcode.jsがマルチバイトを扱えるように変換
+                const utf8Text = unescape(encodeURIComponent(text));
+
+                new QRCode(qrContainer, {
+                    text: utf8Text,
+                    width: 256,
+                    height: 256,
+                    colorDark : "#000000",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.M // バランスの良いMレベル
+                });
+
+                // モーダルを表示
+                const modal = document.getElementById('qrModal');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            } catch (e) {
+                console.error(e);
+                alert("QRコードの生成に失敗しました。文章が長すぎる可能性があります。");
+            }
         }
-        function closeQR() { document.getElementById('qrModal').classList.add('hidden'); }
+
+        function closeQR() { 
+            document.getElementById('qrModal').classList.add('hidden'); 
+            document.getElementById('qrModal').classList.remove('flex');
+        }
     </script>
     
     <div id="qrModal" class="fixed inset-0 bg-black/80 hidden flex-col items-center justify-center z-50 p-4" onclick="closeQR()">
         <div class="bg-white p-8 rounded-3xl flex flex-col items-center" onclick="event.stopPropagation()">
-            <div id="qrcode"></div>
-            <p class="mt-4 text-[10px] text-slate-400 font-bold">Doctor Hub 薬局側アプリで読み取ってください</p>
-            <button onclick="closeQR()" class="mt-6 bg-slate-100 px-6 py-2 rounded-full font-bold">閉じる</button>
+            <div id="qrcode" class="border-4 border-white shadow-inner"></div>
+            <p class="mt-4 text-[11px] text-slate-500 font-bold">Doctor Hub 薬局側アプリで読み取れます</p>
+            <button onclick="closeQR()" class="mt-6 bg-blue-50 text-blue-600 px-8 py-3 rounded-full font-black shadow-sm">閉じる</button>
         </div>
     </div>
 </body>
