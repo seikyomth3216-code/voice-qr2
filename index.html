@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>薬剤師AI要約くん Ver.2.4</title>
+    <title>薬剤師AI要約くん Ver.2.5</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -11,7 +11,6 @@
         body { background-color: #f8fafc; font-family: sans-serif; }
         .loading-spin { animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        /* 印刷時の設定：要約文だけを印刷するように調整 */
         @media print {
             body * { visibility: hidden; }
             #printArea, #printArea * { visibility: visible; }
@@ -24,7 +23,7 @@
     <div class="w-full flex justify-between items-center mb-4">
         <div>
             <h1 class="text-xl font-black italic text-blue-800"><i class="fas fa-prescription mr-2"></i>薬剤師用AI要約</h1>
-            <p class="text-[10px] font-bold text-slate-400">Version 2.4 (実務特化版)</p>
+            <p class="text-[10px] font-bold text-slate-400">Version 2.5 (構造化・実務特化版)</p>
         </div>
         <button onclick="toggleSettings()" class="text-blue-600 p-2"><i class="fas fa-key text-xl"></i></button>
     </div>
@@ -36,7 +35,7 @@
     </div>
 
     <div class="w-full bg-white rounded-2xl shadow-xl p-5 border border-blue-50">
-        <label class="block text-xs font-black text-slate-400 mb-2">① 音声メモを録る</label>
+        <label class="block text-xs font-black text-slate-400 mb-2">① 音声メモを録る / 入力する</label>
         <div class="relative mb-4">
             <textarea id="rawText" class="w-full h-24 p-3 bg-slate-50 rounded-xl border border-slate-200 text-slate-600 text-sm resize-none" placeholder="例：残薬調整、アムロジピン5mgを32日分"></textarea>
             <button onclick="toggleMic()" id="micBtn" class="absolute right-2 bottom-2 bg-blue-500 text-white w-10 h-10 rounded-full shadow-md flex items-center justify-center transition-all active:scale-90">
@@ -49,11 +48,11 @@
         </div>
 
         <button onclick="smartSummarize()" id="aiBtn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-black shadow-lg active:scale-95 transition-all mb-4 flex items-center justify-center gap-2">
-            <i class="fas fa-magic"></i> AIが疑義照会文を作成
+            <i class="fas fa-magic"></i> AIが構造化して要約
         </button>
         <p id="statusMsg" class="text-[10px] text-center text-blue-400 h-4 mb-2 italic"></p>
 
-        <label class="block text-xs font-black text-slate-400 mb-2">② 医師への照会文（要点重視）</label>
+        <label class="block text-xs font-black text-slate-400 mb-2">② 医師への照会文（構造化データ）</label>
         <div id="printArea">
             <textarea id="summaryText" class="w-full h-32 p-3 bg-white rounded-xl border-2 border-blue-400 text-lg font-bold text-slate-800 resize-none shadow-inner mb-2" placeholder="ここに結果が表示されます"></textarea>
         </div>
@@ -76,7 +75,6 @@
         document.addEventListener('DOMContentLoaded', () => {
             const key = localStorage.getItem('gemini_api_key');
             if (key) document.getElementById('apiKeyInput').value = key;
-            else document.getElementById('settingsArea').classList.remove('hidden');
         });
 
         function toggleSettings() { document.getElementById('settingsArea').classList.toggle('hidden'); }
@@ -96,16 +94,12 @@
         }
         function toggleMic() { recognition && recognition.start(); }
 
-        // --- クリップボードコピー ---
         function copyToClipboard() {
             const text = document.getElementById('summaryText').value;
             if (!text) return;
-            navigator.clipboard.writeText(text).then(() => {
-                alert("コピーしました！電子薬歴などに貼り付けてください。");
-            });
+            navigator.clipboard.writeText(text).then(() => { alert("コピーしました！"); });
         }
 
-        // --- AI要約ロジック（自動検知＋要点特化プロンプト） ---
         async function smartSummarize() {
             const apiKey = localStorage.getItem('gemini_api_key');
             const text = document.getElementById('rawText').value;
@@ -117,18 +111,23 @@
             btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> 整形中...';
 
             try {
+                // モデルリストからFlashモデルを動的に取得
                 const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
                 const listRes = await fetch(listUrl);
                 const listData = await listRes.json();
                 const bestModel = listData.models.find(m => m.name.includes('flash') && m.supportedGenerationMethods.includes('generateContent'));
+                const modelName = bestModel ? bestModel.name : "models/gemini-1.5-flash";
                 
-                if (!bestModel) throw new Error("モデルが見つかりません。");
-                
-                const modelName = bestModel.name;
                 const genUrl = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`;
 
-                // 【プロンプト調整】要点特化・挨拶なし・箇条書きなし・結論重視
-                const prompt = `あなたは臨床に精通した薬剤師です。次の[音声メモ]を、多忙な医師が即座に意図を理解できるよう、要点を絞った簡潔な疑義照会文に整形してください。丁寧な挨拶や前置きは一切省き、結論と根拠（理由）のみを簡潔にまとめてください。箇条書きは使わず、2〜3行程度の文章で出力は本文のみとしてください。\n\n[音声メモ]: ${text}`;
+                // 【プロンプト変更】構造化・機械的箇条書きを徹底
+                const prompt = `あなたは臨床に精通した薬剤師です。次の[音声メモ]を、多忙な医師が即座に理解できるよう、機械的な構造化フォーマットで出力してください。丁寧な挨拶や文章表現、前置きは一切不要です。
+必ず以下の2点のみを出力してください。
+
+【変更内容】：（何をどのように変えたいか）
+【理由】：（なぜそれが必要か）
+
+[音声メモ]: ${text}`;
 
                 const genRes = await fetch(genUrl, {
                     method: 'POST',
@@ -139,7 +138,11 @@
                 const genData = await genRes.json();
                 if (genData.error) throw new Error(genData.error.message);
 
-                document.getElementById('summaryText').value = genData.candidates[0].content.parts[0].text.trim();
+                let result = genData.candidates[0].content.parts[0].text.trim();
+                // 余計な記号（Markdownのバッククォート等）を除去
+                result = result.replace(/```/g, '');
+
+                document.getElementById('summaryText').value = result;
                 status.innerText = "作成完了";
 
             } catch (e) {
@@ -147,7 +150,7 @@
                 status.innerText = "エラー";
             } finally {
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-magic"></i> AIが疑義照会文を作成';
+                btn.innerHTML = '<i class="fas fa-magic"></i> AIが構造化して要約';
             }
         }
 
@@ -155,7 +158,15 @@
             const text = document.getElementById('summaryText').value;
             if(!text) return;
             document.getElementById('qrcode').innerHTML = "";
-            new QRCode(document.getElementById('qrcode'), { text: encodeURIComponent(text), width: 256, height: 256 });
+            
+            // 修正：encodeURIComponentを外し、そのままのテキストを渡す
+            new QRCode(document.getElementById('qrcode'), {
+                text: text, 
+                width: 256,
+                height: 256,
+                correctLevel : QRCode.CorrectLevel.H
+            });
+            
             document.getElementById('qrModal').classList.remove('hidden');
             document.getElementById('qrModal').classList.add('flex');
         }
@@ -165,6 +176,7 @@
     <div id="qrModal" class="fixed inset-0 bg-black/80 hidden flex-col items-center justify-center z-50 p-4" onclick="closeQR()">
         <div class="bg-white p-8 rounded-3xl flex flex-col items-center" onclick="event.stopPropagation()">
             <div id="qrcode"></div>
+            <p class="mt-4 text-[10px] text-slate-400 font-bold">Doctor Hub 薬局側アプリで読み取ってください</p>
             <button onclick="closeQR()" class="mt-6 bg-slate-100 px-6 py-2 rounded-full font-bold">閉じる</button>
         </div>
     </div>
