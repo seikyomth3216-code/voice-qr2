@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>薬剤師AI要約くん Ver.2.7</title>
+    <title>薬剤師AI要約くん Ver.2.8</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
         body { background-color: #f8fafc; font-family: sans-serif; }
         .loading-spin { animation: spin 1s linear infinite; }
@@ -23,7 +23,7 @@
     <div class="w-full flex justify-between items-center mb-4">
         <div>
             <h1 class="text-xl font-black italic text-blue-800"><i class="fas fa-prescription mr-2"></i>薬剤師用AI要約</h1>
-            <p class="text-[10px] font-bold text-slate-400">Version 2.7 (QR文字化け解消版)</p>
+            <p class="text-[10px] font-bold text-slate-400">Version 2.8 (QR認識・セキュリティ強化版)</p>
         </div>
         <button onclick="toggleSettings()" class="text-blue-600 p-2"><i class="fas fa-key text-xl"></i></button>
     </div>
@@ -41,6 +41,10 @@
             <button onclick="toggleMic()" id="micBtn" class="absolute right-2 bottom-2 bg-blue-500 text-white w-10 h-10 rounded-full shadow-md flex items-center justify-center transition-all active:scale-90">
                 <i id="micIcon" class="fas fa-microphone"></i>
             </button>
+        </div>
+
+        <div class="bg-red-50 border-l-4 border-red-500 p-3 mb-3 text-[11px] text-red-700 font-bold leading-tight">
+            ⚠️ 患者の氏名や個人情報などは絶対にいれないこと！AIボタンを押す前に削除！
         </div>
 
         <button onclick="smartSummarize()" id="aiBtn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-black shadow-lg active:scale-95 transition-all mb-4 flex items-center justify-center gap-2">
@@ -142,30 +146,50 @@
             }
         }
 
-        // --- 日本語文字化け対応 QRコード生成 ---
+        // QRコード用のUTF-8変換関数
+        function utf16to8(str) {
+            let out = "", i, len, c;
+            len = str.length;
+            for(i = 0; i < len; i++) {
+                c = str.charCodeAt(i);
+                if ((c >= 0x0001) && (c <= 0x007F)) {
+                    out += str.charAt(i);
+                } else if (c > 0x07FF) {
+                    out += String.fromCharCode(0xE0 | ((c >> 12) & 0x0F));
+                    out += String.fromCharCode(0x80 | ((c >>  6) & 0x3F));
+                    out += String.fromCharCode(0x80 | ((c >>  0) & 0x3F));
+                } else {
+                    out += String.fromCharCode(0xC0 | ((c >>  6) & 0x1F));
+                    out += String.fromCharCode(0x80 | ((c >>  0) & 0x3F));
+                }
+            }
+            return out;
+        }
+
         function generateQR() {
             const text = document.getElementById('summaryText').value.trim();
-            if(!text) {
-                alert("要約文が空です。AIボタンで作成してください。");
-                return;
-            }
+            if(!text) return alert("内容がありません");
+
+            const container = document.getElementById('qrcode');
+            container.innerHTML = ""; // 以前のQRをクリア
 
             try {
-                // QRiousライブラリでCanvasに描画
-                const qr = new QRious({
-                    element: document.getElementById('qrCanvas'),
-                    value: text, // 日本語をそのまま渡す
-                    size: 256,
-                    level: 'M'
+                // UTF-8に変換してからQR化（これで文字化けを回避）
+                const qrText = utf16to8(text);
+                
+                new QRCode(container, {
+                    text: qrText,
+                    width: 256,
+                    height: 256,
+                    colorDark : "#000000",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.H // 最高の認識レベル
                 });
 
-                // モーダルを表示
-                const modal = document.getElementById('qrModal');
-                modal.classList.remove('hidden');
-                modal.classList.add('flex');
+                document.getElementById('qrModal').classList.remove('hidden');
+                document.getElementById('qrModal').classList.add('flex');
             } catch (e) {
-                console.error(e);
-                alert("QRコード生成エラー。ブラウザを更新してください。");
+                alert("QRコードの生成中に問題が発生しました。");
             }
         }
 
@@ -176,10 +200,10 @@
     </script>
     
     <div id="qrModal" class="fixed inset-0 bg-black/80 hidden flex-col items-center justify-center z-50 p-4" onclick="closeQR()">
-        <div class="bg-white p-8 rounded-3xl flex flex-col items-center shadow-2xl" onclick="event.stopPropagation()">
-            <canvas id="qrCanvas" class="border-4 border-white shadow-inner"></canvas>
+        <div class="bg-white p-8 rounded-3xl flex flex-col items-center" onclick="event.stopPropagation()">
+            <div id="qrcode" class="border-4 border-white"></div>
             <p class="mt-4 text-[11px] text-slate-500 font-bold">Doctor Hub 薬局側アプリで読み取れます</p>
-            <button onclick="closeQR()" class="mt-6 bg-blue-50 text-blue-600 px-8 py-3 rounded-full font-black shadow-sm active:scale-95">閉じる</button>
+            <button onclick="closeQR()" class="mt-6 bg-blue-50 text-blue-600 px-8 py-3 rounded-full font-black">閉じる</button>
         </div>
     </div>
 </body>
