@@ -71,7 +71,7 @@
         </button>
     </div>
 
-    <script>
+<script>
         document.addEventListener('DOMContentLoaded', () => {
             const key = localStorage.getItem('gemini_api_key');
             if (key) document.getElementById('apiKeyInput').value = key;
@@ -100,9 +100,12 @@
             navigator.clipboard.writeText(text).then(() => { alert("コピーしました！"); });
         }
 
+        // ▼▼▼ 修正ポイント：強力なクリーニング機能を追加 ▼▼▼
         async function smartSummarize() {
             const apiKey = localStorage.getItem('gemini_api_key');
-            const text = document.getElementById('rawText').value;
+            // 入力テキストからBOM(\uFEFF)を除去して取得
+            let text = document.getElementById('rawText').value.replace(/\uFEFF/g, '');
+            
             if (!apiKey || !text) return alert("キーと内容を確認してください");
 
             const btn = document.getElementById('aiBtn');
@@ -133,8 +136,15 @@
                 const genData = await genRes.json();
                 if (genData.error) throw new Error(genData.error.message);
 
-                let result = genData.candidates[0].content.parts[0].text.trim();
-                document.getElementById('summaryText').value = result.replace(/```/g, '');
+                // AIの回答を取得
+                let result = genData.candidates[0].content.parts[0].text;
+                
+                // ▼▼▼ ここでゴミ(BOMや不要な記号)を徹底除去 ▼▼▼
+                result = result.replace(/\uFEFF/g, ''); // BOMを除去
+                result = result.replace(/```/g, '');    // マークダウンを除去
+                result = result.trim();                 // 前後の空白を除去
+
+                document.getElementById('summaryText').value = result;
                 status.innerText = "作成完了";
 
             } catch (e) {
@@ -146,7 +156,7 @@
             }
         }
 
-        // QRコード用のUTF-8変換関数
+        // QRコード用のUTF-8変換関数（変更なし）
         function utf16to8(str) {
             let out = "", i, len, c;
             len = str.length;
@@ -167,14 +177,15 @@
         }
 
         function generateQR() {
-            const text = document.getElementById('summaryText').value.trim();
+            // ここでも念のためBOMを除去して取得
+            let text = document.getElementById('summaryText').value.replace(/\uFEFF/g, '').trim();
             if(!text) return alert("内容がありません");
 
             const container = document.getElementById('qrcode');
-            container.innerHTML = ""; // 以前のQRをクリア
+            container.innerHTML = ""; 
 
             try {
-                // UTF-8に変換してからQR化（これで文字化けを回避）
+                // QRコード生成時のみ utf16to8 を通す
                 const qrText = utf16to8(text);
                 
                 new QRCode(container, {
@@ -183,7 +194,7 @@
                     height: 256,
                     colorDark : "#000000",
                     colorLight : "#ffffff",
-                    correctLevel : QRCode.CorrectLevel.H // 最高の認識レベル
+                    correctLevel : QRCode.CorrectLevel.H 
                 });
 
                 document.getElementById('qrModal').classList.remove('hidden');
@@ -198,7 +209,7 @@
             document.getElementById('qrModal').classList.remove('flex');
         }
     </script>
-    
+
     <div id="qrModal" class="fixed inset-0 bg-black/80 hidden flex-col items-center justify-center z-50 p-4" onclick="closeQR()">
         <div class="bg-white p-8 rounded-3xl flex flex-col items-center" onclick="event.stopPropagation()">
             <div id="qrcode" class="border-4 border-white"></div>
@@ -208,3 +219,4 @@
     </div>
 </body>
 </html>
+
