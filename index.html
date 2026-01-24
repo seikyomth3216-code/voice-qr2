@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>薬剤師AI要約くん Ver.2.6</title>
+    <title>薬剤師AI要約くん Ver.2.7</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
     <style>
         body { background-color: #f8fafc; font-family: sans-serif; }
         .loading-spin { animation: spin 1s linear infinite; }
@@ -23,7 +23,7 @@
     <div class="w-full flex justify-between items-center mb-4">
         <div>
             <h1 class="text-xl font-black italic text-blue-800"><i class="fas fa-prescription mr-2"></i>薬剤師用AI要約</h1>
-            <p class="text-[10px] font-bold text-slate-400">Version 2.6 (QR修正・構造化版)</p>
+            <p class="text-[10px] font-bold text-slate-400">Version 2.7 (QR文字化け解消版)</p>
         </div>
         <button onclick="toggleSettings()" class="text-blue-600 p-2"><i class="fas fa-key text-xl"></i></button>
     </div>
@@ -35,7 +35,7 @@
     </div>
 
     <div class="w-full bg-white rounded-2xl shadow-xl p-5 border border-blue-50">
-        <label class="block text-xs font-black text-slate-400 mb-2">① 音声メモを録る / 入力する</label>
+        <label class="block text-xs font-black text-slate-400 mb-2">① 音声メモ / テキスト入力</label>
         <div class="relative mb-4">
             <textarea id="rawText" class="w-full h-24 p-3 bg-slate-50 rounded-xl border border-slate-200 text-slate-600 text-sm resize-none" placeholder="例：残薬調整、アムロジピン5mgを32日分"></textarea>
             <button onclick="toggleMic()" id="micBtn" class="absolute right-2 bottom-2 bg-blue-500 text-white w-10 h-10 rounded-full shadow-md flex items-center justify-center transition-all active:scale-90">
@@ -43,18 +43,14 @@
             </button>
         </div>
 
-        <div class="bg-red-50 border-l-4 border-red-500 p-3 mb-3 text-[11px] text-red-700 font-bold leading-tight">
-            ⚠️ 患者の氏名や個人情報などは絶対にいれないこと！AIボタンを押す前に削除！
-        </div>
-
         <button onclick="smartSummarize()" id="aiBtn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-black shadow-lg active:scale-95 transition-all mb-4 flex items-center justify-center gap-2">
             <i class="fas fa-magic"></i> AIが構造化して要約
         </button>
         <p id="statusMsg" class="text-[10px] text-center text-blue-400 h-4 mb-2 italic"></p>
 
-        <label class="block text-xs font-black text-slate-400 mb-2">② 医師への照会文（構造化データ）</label>
+        <label class="block text-xs font-black text-slate-400 mb-2">② 医師への照会文（要点）</label>
         <div id="printArea">
-            <textarea id="summaryText" class="w-full h-32 p-3 bg-white rounded-xl border-2 border-blue-400 text-lg font-bold text-slate-800 resize-none shadow-inner mb-2" placeholder="ここに結果が表示されます"></textarea>
+            <textarea id="summaryText" class="w-full h-32 p-3 bg-white rounded-xl border-2 border-blue-400 text-lg font-bold text-slate-800 resize-none shadow-inner mb-2"></textarea>
         </div>
 
         <div class="flex gap-2 mb-4">
@@ -119,12 +115,9 @@
                 
                 const genUrl = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`;
 
-                const prompt = `あなたは臨床に精通した薬剤師です。次の[音声メモ]を、多忙な医師が即座に理解できるよう、機械的な構造化フォーマットで出力してください。丁寧な挨拶や文章表現、前置きは一切不要です。
-必ず以下の2点のみを出力してください。
-
-【変更内容】：（何をどのように変えたいか）
-【理由】：（なぜそれが必要か）
-
+                const prompt = `あなたは薬剤師です。次の[音声メモ]を、以下の2点のみの構造で出力してください。挨拶は不要です。
+【変更内容】：
+【理由】：
 [音声メモ]: ${text}`;
 
                 const genRes = await fetch(genUrl, {
@@ -137,9 +130,7 @@
                 if (genData.error) throw new Error(genData.error.message);
 
                 let result = genData.candidates[0].content.parts[0].text.trim();
-                result = result.replace(/```/g, '');
-
-                document.getElementById('summaryText').value = result;
+                document.getElementById('summaryText').value = result.replace(/```/g, '');
                 status.innerText = "作成完了";
 
             } catch (e) {
@@ -151,29 +142,21 @@
             }
         }
 
-        // --- 日本語対応版QR生成ロジック ---
+        // --- 日本語文字化け対応 QRコード生成 ---
         function generateQR() {
             const text = document.getElementById('summaryText').value.trim();
             if(!text) {
-                alert("要約文が空です。AIボタンで文章を作成してください。");
+                alert("要約文が空です。AIボタンで作成してください。");
                 return;
             }
 
-            const qrContainer = document.getElementById('qrcode');
-            qrContainer.innerHTML = ""; // 初期化
-            
             try {
-                // 日本語（UTF-8）を正しく扱うためのエスケープ処理
-                // qrcode.jsがマルチバイトを扱えるように変換
-                const utf8Text = unescape(encodeURIComponent(text));
-
-                new QRCode(qrContainer, {
-                    text: utf8Text,
-                    width: 256,
-                    height: 256,
-                    colorDark : "#000000",
-                    colorLight : "#ffffff",
-                    correctLevel : QRCode.CorrectLevel.M // バランスの良いMレベル
+                // QRiousライブラリでCanvasに描画
+                const qr = new QRious({
+                    element: document.getElementById('qrCanvas'),
+                    value: text, // 日本語をそのまま渡す
+                    size: 256,
+                    level: 'M'
                 });
 
                 // モーダルを表示
@@ -182,7 +165,7 @@
                 modal.classList.add('flex');
             } catch (e) {
                 console.error(e);
-                alert("QRコードの生成に失敗しました。文章が長すぎる可能性があります。");
+                alert("QRコード生成エラー。ブラウザを更新してください。");
             }
         }
 
@@ -193,10 +176,10 @@
     </script>
     
     <div id="qrModal" class="fixed inset-0 bg-black/80 hidden flex-col items-center justify-center z-50 p-4" onclick="closeQR()">
-        <div class="bg-white p-8 rounded-3xl flex flex-col items-center" onclick="event.stopPropagation()">
-            <div id="qrcode" class="border-4 border-white shadow-inner"></div>
+        <div class="bg-white p-8 rounded-3xl flex flex-col items-center shadow-2xl" onclick="event.stopPropagation()">
+            <canvas id="qrCanvas" class="border-4 border-white shadow-inner"></canvas>
             <p class="mt-4 text-[11px] text-slate-500 font-bold">Doctor Hub 薬局側アプリで読み取れます</p>
-            <button onclick="closeQR()" class="mt-6 bg-blue-50 text-blue-600 px-8 py-3 rounded-full font-black shadow-sm">閉じる</button>
+            <button onclick="closeQR()" class="mt-6 bg-blue-50 text-blue-600 px-8 py-3 rounded-full font-black shadow-sm active:scale-95">閉じる</button>
         </div>
     </div>
 </body>
