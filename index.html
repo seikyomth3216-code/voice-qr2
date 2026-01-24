@@ -3,19 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>薬剤師AI要約くん Ver.2.8</title>
+    <title>薬剤師AI要約くん Ver.2.9</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
-        body { background-color: #f8fafc; font-family: sans-serif; }
+        body { background-color: #f1f5f9; font-family: sans-serif; }
         .loading-spin { animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        @media print {
-            body * { visibility: hidden; }
-            #printArea, #printArea * { visibility: visible; }
-            #printArea { position: absolute; left: 0; top: 0; width: 100%; font-size: 20pt; }
-        }
+        /* QRコードの周りに十分な余白を作る */
+        #qrcode img { margin: auto; border: 16px solid white; border-radius: 8px; }
     </style>
 </head>
 <body class="p-4 flex flex-col items-center min-h-screen max-w-md mx-auto text-slate-800">
@@ -23,187 +20,131 @@
     <div class="w-full flex justify-between items-center mb-4">
         <div>
             <h1 class="text-xl font-black italic text-blue-800"><i class="fas fa-prescription mr-2"></i>薬剤師用AI要約</h1>
-            <p class="text-[10px] font-bold text-slate-400">Version 2.8 (QR認識・セキュリティ強化版)</p>
+            <p class="text-[10px] font-bold text-slate-400">Version 2.9 (スキャン認識強化版)</p>
         </div>
         <button onclick="toggleSettings()" class="text-blue-600 p-2"><i class="fas fa-key text-xl"></i></button>
     </div>
 
+    <div class="w-full bg-red-100 border-l-4 border-red-500 p-3 mb-4 text-[12px] text-red-700 font-bold shadow-sm">
+        <i class="fas fa-exclamation-triangle mr-1"></i> ⚠️ 個人情報は絶対に入力しないでください！AI送信前に削除！
+    </div>
+
     <div id="settingsArea" class="w-full bg-white p-4 rounded-xl shadow-lg mb-6 border-2 border-blue-100 hidden">
         <label class="block text-[10px] font-bold text-slate-500 mb-1">Google Gemini API Key</label>
-        <input type="password" id="apiKeyInput" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 text-sm mb-3" placeholder="AIza...">
-        <button onclick="saveApiKey()" class="w-full bg-blue-600 text-white py-2 rounded-lg font-bold text-sm">キーを保存</button>
+        <input type="password" id="apiKeyInput" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 text-sm mb-3">
+        <button onclick="saveApiKey()" class="w-full bg-blue-600 text-white py-2 rounded-lg font-bold">キーを保存</button>
     </div>
 
     <div class="w-full bg-white rounded-2xl shadow-xl p-5 border border-blue-50">
         <label class="block text-xs font-black text-slate-400 mb-2">① 音声メモ / テキスト入力</label>
         <div class="relative mb-4">
-            <textarea id="rawText" class="w-full h-24 p-3 bg-slate-50 rounded-xl border border-slate-200 text-slate-600 text-sm resize-none" placeholder="例：残薬調整、アムロジピン5mgを32日分"></textarea>
+            <textarea id="rawText" class="w-full h-24 p-3 bg-slate-50 rounded-xl border border-slate-200 text-sm resize-none" placeholder="例：残薬調整、アムロジピン5mgを32日分"></textarea>
             <button onclick="toggleMic()" id="micBtn" class="absolute right-2 bottom-2 bg-blue-500 text-white w-10 h-10 rounded-full shadow-md flex items-center justify-center transition-all active:scale-90">
                 <i id="micIcon" class="fas fa-microphone"></i>
             </button>
         </div>
 
-        <div class="bg-red-50 border-l-4 border-red-500 p-3 mb-3 text-[11px] text-red-700 font-bold leading-tight">
-            ⚠️ 患者の氏名や個人情報などは絶対にいれないこと！AIボタンを押す前に削除！
-        </div>
-
-        <button onclick="smartSummarize()" id="aiBtn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-black shadow-lg active:scale-95 transition-all mb-4 flex items-center justify-center gap-2">
-            <i class="fas fa-magic"></i> AIが構造化して要約
+        <button onclick="smartSummarize()" id="aiBtn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-black shadow-lg active:scale-95 transition-all mb-4">
+            <i class="fas fa-magic mr-1"></i> AIが短く要約
         </button>
-        <p id="statusMsg" class="text-[10px] text-center text-blue-400 h-4 mb-2 italic"></p>
 
-        <label class="block text-xs font-black text-slate-400 mb-2">② 医師への照会文（要点）</label>
-        <div id="printArea">
-            <textarea id="summaryText" class="w-full h-32 p-3 bg-white rounded-xl border-2 border-blue-400 text-lg font-bold text-slate-800 resize-none shadow-inner mb-2"></textarea>
-        </div>
+        <label class="block text-xs font-black text-slate-400 mb-2">② 医師への照会文（短縮版）</label>
+        <textarea id="summaryText" class="w-full h-28 p-3 bg-white rounded-xl border-2 border-blue-400 text-lg font-bold text-slate-800 resize-none mb-4"></textarea>
 
-        <div class="flex gap-2 mb-4">
-            <button onclick="copyToClipboard()" class="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all flex items-center justify-center gap-2">
-                <i class="fas fa-copy"></i> コピー
+        <div class="grid grid-cols-2 gap-2">
+            <button onclick="generateQR()" class="col-span-2 bg-slate-800 text-white py-4 rounded-xl font-black shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all">
+                <i class="fas fa-qrcode"></i> QRコードを表示
             </button>
-            <button onclick="window.print()" class="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all flex items-center justify-center gap-2">
-                <i class="fas fa-print"></i> 印刷
-            </button>
+            <button onclick="testQR()" class="text-[10px] text-slate-400 underline py-2">スキャンテスト用QR</button>
         </div>
-
-        <button onclick="generateQR()" id="qrBtn" class="w-full bg-slate-800 text-white py-4 rounded-xl font-black shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all">
-            <i class="fas fa-qrcode"></i> QRコードを表示
-        </button>
     </div>
 
     <script>
+        // APIキー管理
         document.addEventListener('DOMContentLoaded', () => {
             const key = localStorage.getItem('gemini_api_key');
             if (key) document.getElementById('apiKeyInput').value = key;
         });
-
         function toggleSettings() { document.getElementById('settingsArea').classList.toggle('hidden'); }
         function saveApiKey() {
-            const key = document.getElementById('apiKeyInput').value.trim();
-            localStorage.setItem('gemini_api_key', key);
+            localStorage.setItem('gemini_api_key', document.getElementById('apiKeyInput').value.trim());
             document.getElementById('settingsArea').classList.add('hidden');
-            alert("APIキーを保存しました");
+            alert("保存しました");
         }
 
+        // 音声認識
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        let recognition = null;
-        if (SpeechRecognition) {
-            recognition = new SpeechRecognition();
+        let recognition = SpeechRecognition ? new SpeechRecognition() : null;
+        if(recognition) {
             recognition.lang = 'ja-JP';
             recognition.onresult = (e) => { document.getElementById('rawText').value += e.results[0][0].transcript; };
         }
         function toggleMic() { recognition && recognition.start(); }
 
-        function copyToClipboard() {
-            const text = document.getElementById('summaryText').value;
-            if (!text) return;
-            navigator.clipboard.writeText(text).then(() => { alert("コピーしました！"); });
-        }
-
+        // AI要約ロジック
         async function smartSummarize() {
             const apiKey = localStorage.getItem('gemini_api_key');
             const text = document.getElementById('rawText').value;
             if (!apiKey || !text) return alert("キーと内容を確認してください");
 
             const btn = document.getElementById('aiBtn');
-            const status = document.getElementById('statusMsg');
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> 整形中...';
 
             try {
-                const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-                const listRes = await fetch(listUrl);
-                const listData = await listRes.json();
-                const bestModel = listData.models.find(m => m.name.includes('flash') && m.supportedGenerationMethods.includes('generateContent'));
-                const modelName = bestModel ? bestModel.name : "models/gemini-1.5-flash";
-                
-                const genUrl = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`;
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+                // QRが細かくなりすぎないよう、さらに短くするよう指示を強化
+                const prompt = `あなたは薬剤師です。次の[音声メモ]を、非常に短く構造化してください。
+【内容】：（15文字以内）
+【理由】：（20文字以内）
+挨拶は不要。合計で40文字程度に収めてください。\n\n[音声メモ]: ${text}`;
 
-                const prompt = `あなたは薬剤師です。次の[音声メモ]を、以下の2点のみの構造で出力してください。挨拶は不要です。
-【変更内容】：
-【理由】：
-[音声メモ]: ${text}`;
-
-                const genRes = await fetch(genUrl, {
+                const res = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                 });
-
-                const genData = await genRes.json();
-                if (genData.error) throw new Error(genData.error.message);
-
-                let result = genData.candidates[0].content.parts[0].text.trim();
-                document.getElementById('summaryText').value = result.replace(/```/g, '');
-                status.innerText = "作成完了";
-
+                const data = await res.json();
+                document.getElementById('summaryText').value = data.candidates[0].content.parts[0].text.trim().replace(/```/g, '');
             } catch (e) {
                 alert("エラー: " + e.message);
-                status.innerText = "エラー";
             } finally {
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-magic"></i> AIが構造化して要約';
+                btn.innerHTML = '<i class="fas fa-magic mr-1"></i> AIが短く要約';
             }
         }
 
-        // QRコード用のUTF-8変換関数
-        function utf16to8(str) {
-            let out = "", i, len, c;
-            len = str.length;
-            for(i = 0; i < len; i++) {
-                c = str.charCodeAt(i);
-                if ((c >= 0x0001) && (c <= 0x007F)) {
-                    out += str.charAt(i);
-                } else if (c > 0x07FF) {
-                    out += String.fromCharCode(0xE0 | ((c >> 12) & 0x0F));
-                    out += String.fromCharCode(0x80 | ((c >>  6) & 0x3F));
-                    out += String.fromCharCode(0x80 | ((c >>  0) & 0x3F));
-                } else {
-                    out += String.fromCharCode(0xC0 | ((c >>  6) & 0x1F));
-                    out += String.fromCharCode(0x80 | ((c >>  0) & 0x3F));
-                }
-            }
-            return out;
-        }
-
-        function generateQR() {
-            const text = document.getElementById('summaryText').value.trim();
+        // QR生成ロジック
+        function generateQR(manualText = null) {
+            const text = manualText || document.getElementById('summaryText').value.trim();
             if(!text) return alert("内容がありません");
 
             const container = document.getElementById('qrcode');
-            container.innerHTML = ""; // 以前のQRをクリア
+            container.innerHTML = ""; 
 
-            try {
-                // UTF-8に変換してからQR化（これで文字化けを回避）
-                const qrText = utf16to8(text);
-                
-                new QRCode(container, {
-                    text: qrText,
-                    width: 256,
-                    height: 256,
-                    colorDark : "#000000",
-                    colorLight : "#ffffff",
-                    correctLevel : QRCode.CorrectLevel.H // 最高の認識レベル
-                });
+            // QRコードの認識率を上げるための設定
+            new QRCode(container, {
+                text: unescape(encodeURIComponent(text)), // 日本語対応
+                width: 280,   // 少し大きく
+                height: 280,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.L // 文字が多いときはLにすると点が大きくなり認識しやすい
+            });
 
-                document.getElementById('qrModal').classList.remove('hidden');
-                document.getElementById('qrModal').classList.add('flex');
-            } catch (e) {
-                alert("QRコードの生成中に問題が発生しました。");
-            }
+            document.getElementById('qrModal').classList.replace('hidden', 'flex');
         }
 
-        function closeQR() { 
-            document.getElementById('qrModal').classList.add('hidden'); 
-            document.getElementById('qrModal').classList.remove('flex');
-        }
+        function testQR() { generateQR("TEST1234"); } // テスト用
+        function closeQR() { document.getElementById('qrModal').classList.replace('flex', 'hidden'); }
     </script>
     
-    <div id="qrModal" class="fixed inset-0 bg-black/80 hidden flex-col items-center justify-center z-50 p-4" onclick="closeQR()">
-        <div class="bg-white p-8 rounded-3xl flex flex-col items-center" onclick="event.stopPropagation()">
-            <div id="qrcode" class="border-4 border-white"></div>
-            <p class="mt-4 text-[11px] text-slate-500 font-bold">Doctor Hub 薬局側アプリで読み取れます</p>
-            <button onclick="closeQR()" class="mt-6 bg-blue-50 text-blue-600 px-8 py-3 rounded-full font-black">閉じる</button>
+    <div id="qrModal" class="fixed inset-0 bg-black/90 hidden flex-col items-center justify-center z-50 p-4" onclick="closeQR()">
+        <div class="bg-white p-4 rounded-3xl flex flex-col items-center" onclick="event.stopPropagation()">
+            <div id="qrcode"></div> <p class="mt-2 text-[12px] font-bold text-slate-800 text-center">
+                カメラを近づけすぎず、<br>ピントを合わせてください
+            </p>
+            <button onclick="closeQR()" class="mt-6 bg-slate-100 px-10 py-3 rounded-full font-bold">閉じる</button>
         </div>
     </div>
 </body>
