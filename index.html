@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>薬剤師AI要約くん Ver.2.8</title>
+    <title>薬剤師AI要約くん Ver.2.82</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
     <style>
         body { background-color: #f8fafc; font-family: sans-serif; }
         .loading-spin { animation: spin 1s linear infinite; }
@@ -23,7 +24,7 @@
     <div class="w-full flex justify-between items-center mb-4">
         <div>
             <h1 class="text-xl font-black italic text-blue-800"><i class="fas fa-prescription mr-2"></i>薬剤師用AI要約</h1>
-            <p class="text-[10px] font-bold text-slate-400">Version 2.8 (QR認識・セキュリティ強化版)</p>
+            <p class="text-[10px] font-bold text-slate-400">Version 2.82 (SJIS安定版)</p>
         </div>
         <button onclick="toggleSettings()" class="text-blue-600 p-2"><i class="fas fa-key text-xl"></i></button>
     </div>
@@ -43,10 +44,6 @@
             </button>
         </div>
 
-        <div class="bg-red-50 border-l-4 border-red-500 p-3 mb-3 text-[11px] text-red-700 font-bold leading-tight">
-            ⚠️ 患者の氏名や個人情報などは絶対にいれないこと！AIボタンを押す前に削除！
-        </div>
-
         <button onclick="smartSummarize()" id="aiBtn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-xl font-black shadow-lg active:scale-95 transition-all mb-4 flex items-center justify-center gap-2">
             <i class="fas fa-magic"></i> AIが構造化して要約
         </button>
@@ -58,10 +55,10 @@
         </div>
 
         <div class="flex gap-2 mb-4">
-            <button onclick="copyToClipboard()" class="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all flex items-center justify-center gap-2">
+            <button onclick="copyToClipboard()" class="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2">
                 <i class="fas fa-copy"></i> コピー
             </button>
-            <button onclick="window.print()" class="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all flex items-center justify-center gap-2">
+            <button onclick="window.print()" class="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2">
                 <i class="fas fa-print"></i> 印刷
             </button>
         </div>
@@ -71,105 +68,123 @@
         </button>
     </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
-
-<script>
-    // --- 既存の関数（saveApiKeyなどはそのまま） ---
-
-    async function smartSummarize() {
-        const apiKey = localStorage.getItem('gemini_api_key');
-        // 入力時のBOMを徹底除去
-        let text = document.getElementById('rawText').value.replace(/[\uFEFF\u200B\u200C\u200D]/g, '');
-        
-        if (!apiKey || !text) return alert("キーと内容を確認してください");
-
-        const btn = document.getElementById('aiBtn');
-        const status = document.getElementById('statusMsg');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> 整形中...';
-
-        try {
-            const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-            const listRes = await fetch(listUrl);
-            const listData = await listRes.json();
-            const bestModel = listData.models.find(m => m.name.includes('flash'));
-            const modelName = bestModel ? bestModel.name : "models/gemini-1.5-flash";
-            const genUrl = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`;
-
-            const prompt = `あなたは薬剤師です。次の[音声メモ]を、以下の2点のみの構造で出力してください。挨拶や注釈は一切不要です。
-【変更内容】：
-【理由】：
-[音声メモ]: ${text}`;
-
-            const genRes = await fetch(genUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-            });
-
-            const genData = await genRes.json();
-            let result = genData.candidates[0].content.parts[0].text;
-            
-            // AIからの回答に含まれるBOMや装飾を除去
-            result = result.replace(/[\uFEFF\u200B\u200C\u200D]/g, '').replace(/```/g, '').trim();
-
-            document.getElementById('summaryText').value = result;
-            status.innerText = "作成完了";
-        } catch (e) {
-            alert("エラー: " + e.message);
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-magic"></i> AIが構造化して要約';
-        }
-    }
-
-    // --- ここが今回の肝：Shift-JISでのQRコード生成 ---
-    function generateQR() {
-        const rawText = document.getElementById('summaryText').value.trim();
-        if(!rawText) return alert("内容がありません");
-
-        // 1. BOMや特殊な空白を完全に削除
-        const cleanText = rawText.replace(/[\uFEFF\u200B\u200C\u200D]/g, '');
-
-        // 2. 文字列をShift-JISのバイト配列に変換
-        const unicodeArray = Encoding.stringToCode(cleanText);
-        const sjisBuffer = Encoding.convert(unicodeArray, {
-            to: 'SJIS',
-            from: 'UNICODE'
-        });
-
-        // 3. 変換後のデータをバイナリ文字列として復元
-        const sjisString = sjisBuffer.map(code => String.fromCharCode(code)).join('');
-
-        const container = document.getElementById('qrcode');
-        container.innerHTML = ""; 
-
-        try {
-            new QRCode(container, {
-                text: sjisString, // Shift-JIS化した文字列を渡す
-                width: 256,
-                height: 256,
-                colorDark : "#000000",
-                colorLight : "#ffffff",
-                correctLevel : QRCode.CorrectLevel.M // 密度を少し下げて読み取りやすく
-            });
-
-            document.getElementById('qrModal').classList.remove('hidden');
-            document.getElementById('qrModal').classList.add('flex');
-        } catch (e) {
-            alert("QR生成エラー。文字数が多すぎる可能性があります。");
-        }
-    }
-</script>
-
     <div id="qrModal" class="fixed inset-0 bg-black/80 hidden flex-col items-center justify-center z-50 p-4" onclick="closeQR()">
         <div class="bg-white p-8 rounded-3xl flex flex-col items-center" onclick="event.stopPropagation()">
             <div id="qrcode" class="border-4 border-white"></div>
-            <p class="mt-4 text-[11px] text-slate-500 font-bold">Doctor Hub 薬局側アプリで読み取れます</p>
+            <p class="mt-4 text-[11px] text-slate-500 font-bold">Doctor Hub 等のアプリで読み取り可能</p>
             <button onclick="closeQR()" class="mt-6 bg-blue-50 text-blue-600 px-8 py-3 rounded-full font-black">閉じる</button>
         </div>
     </div>
+
+    <script>
+        // 起動時の処理
+        document.addEventListener('DOMContentLoaded', () => {
+            const key = localStorage.getItem('gemini_api_key');
+            if (key) document.getElementById('apiKeyInput').value = key;
+        });
+
+        // UI操作：設定
+        function toggleSettings() {
+            const area = document.getElementById('settingsArea');
+            area.classList.toggle('hidden');
+        }
+
+        function saveApiKey() {
+            const key = document.getElementById('apiKeyInput').value.trim();
+            localStorage.setItem('gemini_api_key', key);
+            document.getElementById('settingsArea').classList.add('hidden');
+            alert("APIキーを保存しました");
+        }
+
+        // 音声認識
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'ja-JP';
+            recognition.onresult = (e) => { document.getElementById('rawText').value += e.results[0][0].transcript; };
+        }
+        function toggleMic() { recognition && recognition.start(); }
+
+        function copyToClipboard() {
+            const text = document.getElementById('summaryText').value;
+            if (!text) return;
+            navigator.clipboard.writeText(text).then(() => { alert("コピーしました！"); });
+        }
+
+        // AI要約実行
+        async function smartSummarize() {
+            const apiKey = localStorage.getItem('gemini_api_key');
+            let text = document.getElementById('rawText').value.replace(/[\uFEFF\u200B-\u200D\u2028\u2029]/g, '');
+            if (!apiKey || !text) return alert("キーと内容を確認してください");
+
+            const btn = document.getElementById('aiBtn');
+            const status = document.getElementById('statusMsg');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> 整形中...';
+
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: `あなたは薬剤師です。次の[メモ]を【変更内容】：【理由】：の形式で要約してください。挨拶不要。\n[メモ]: ${text}` }] }] })
+                });
+
+                const data = await response.json();
+                if (data.error) throw new Error(data.error.message);
+
+                let result = data.candidates[0].content.parts[0].text;
+                result = result.replace(/[\uFEFF\u200B-\u200D\u2028\u2029]/g, '').replace(/```/g, '').trim();
+
+                document.getElementById('summaryText').value = result;
+                status.innerText = "作成完了";
+            } catch (e) {
+                alert("エラー: " + e.message);
+                status.innerText = "エラー";
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-magic"></i> AIが構造化して要約';
+            }
+        }
+
+        // QRコード生成 (Shift-JIS対応)
+        function generateQR() {
+            const text = document.getElementById('summaryText').value.trim();
+            if(!text) return alert("内容がありません");
+
+            const container = document.getElementById('qrcode');
+            container.innerHTML = ""; 
+
+            try {
+                // 1. BOM除去
+                const cleanText = text.replace(/[\uFEFF\u200B-\u200D]/g, '');
+
+                // 2. Encoding.js で Shift-JISのバイト列に変換
+                const unicodeArray = Encoding.stringToCode(cleanText);
+                const sjisBytes = Encoding.convert(unicodeArray, { to: 'SJIS', from: 'UNICODE' });
+
+                // 3. qrcode-generator でQR生成 (SJISバイナリとして扱う)
+                // type=0(自動), errorCorrectionLevel='M'
+                const qr = qrcode(0, 'M');
+                qr.addData(Encoding.codeToString(sjisBytes), 'Byte'); 
+                qr.make();
+
+                // 4. HTMLとして出力 (セルサイズを8にして大きく表示)
+                container.innerHTML = qr.createImgTag(6);
+
+                document.getElementById('qrModal').classList.remove('hidden');
+                document.getElementById('qrModal').classList.add('flex');
+            } catch (e) {
+                console.error(e);
+                alert("QRコード生成に失敗しました。文字数を減らしてください。");
+            }
+        }
+
+        function closeQR() { 
+            document.getElementById('qrModal').classList.add('hidden'); 
+            document.getElementById('qrModal').classList.remove('flex');
+        }
+    </script>
 </body>
 </html>
-
-
