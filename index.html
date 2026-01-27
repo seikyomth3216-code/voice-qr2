@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>薬剤師AI要約くん Ver.2.82</title>
+    <title>薬剤師AI要約くん Ver.2.83</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
@@ -24,7 +24,7 @@
     <div class="w-full flex justify-between items-center mb-4">
         <div>
             <h1 class="text-xl font-black italic text-blue-800"><i class="fas fa-prescription mr-2"></i>薬剤師用AI要約</h1>
-            <p class="text-[10px] font-bold text-slate-400">Version 2.82 (SJIS安定版)</p>
+            <p class="text-[10px] font-bold text-slate-400">Version 2.83 (AI修復・SJIS版)</p>
         </div>
         <button onclick="toggleSettings()" class="text-blue-600 p-2"><i class="fas fa-key text-xl"></i></button>
     </div>
@@ -83,10 +83,8 @@
             if (key) document.getElementById('apiKeyInput').value = key;
         });
 
-        // UI操作：設定
         function toggleSettings() {
-            const area = document.getElementById('settingsArea');
-            area.classList.toggle('hidden');
+            document.getElementById('settingsArea').classList.toggle('hidden');
         }
 
         function saveApiKey() {
@@ -96,7 +94,6 @@
             alert("APIキーを保存しました");
         }
 
-        // 音声認識
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
         if (SpeechRecognition) {
@@ -112,10 +109,11 @@
             navigator.clipboard.writeText(text).then(() => { alert("コピーしました！"); });
         }
 
-        // AI要約実行
+        // ▼▼▼ AI要約ロジック（Ver 2.8の動的取得版に復元）▼▼▼
         async function smartSummarize() {
             const apiKey = localStorage.getItem('gemini_api_key');
             let text = document.getElementById('rawText').value.replace(/[\uFEFF\u200B-\u200D\u2028\u2029]/g, '');
+            
             if (!apiKey || !text) return alert("キーと内容を確認してください");
 
             const btn = document.getElementById('aiBtn');
@@ -124,8 +122,19 @@
             btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> 整形中...';
 
             try {
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-                const response = await fetch(url, {
+                // 1. まず利用可能なモデル一覧を取得する（ここを復活！）
+                const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+                const listRes = await fetch(listUrl);
+                const listData = await listRes.json();
+                
+                // 2. 'flash'を含むモデルを探し、なければデフォルトを使う
+                const bestModel = listData.models.find(m => m.name.includes('flash') && m.supportedGenerationMethods.includes('generateContent'));
+                const modelName = bestModel ? bestModel.name : "models/gemini-1.5-flash";
+
+                // 3. 取得したモデル名でリクエストURLを作成
+                const genUrl = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`;
+
+                const response = await fetch(genUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ contents: [{ parts: [{ text: `あなたは薬剤師です。次の[メモ]を【変更内容】：【理由】：の形式で要約してください。挨拶不要。\n[メモ]: ${text}` }] }] })
@@ -135,6 +144,7 @@
                 if (data.error) throw new Error(data.error.message);
 
                 let result = data.candidates[0].content.parts[0].text;
+                // AIの回答からゴミを掃除
                 result = result.replace(/[\uFEFF\u200B-\u200D\u2028\u2029]/g, '').replace(/```/g, '').trim();
 
                 document.getElementById('summaryText').value = result;
@@ -148,7 +158,7 @@
             }
         }
 
-        // QRコード生成 (Shift-JIS対応)
+        // ▼▼▼ QR生成ロジック（Ver 2.82のShift-JIS版を維持）▼▼▼
         function generateQR() {
             const text = document.getElementById('summaryText').value.trim();
             if(!text) return alert("内容がありません");
@@ -157,27 +167,25 @@
             container.innerHTML = ""; 
 
             try {
-                // 1. BOM除去
+                // BOM除去
                 const cleanText = text.replace(/[\uFEFF\u200B-\u200D]/g, '');
 
-                // 2. Encoding.js で Shift-JISのバイト列に変換
+                // Shift-JISに変換
                 const unicodeArray = Encoding.stringToCode(cleanText);
                 const sjisBytes = Encoding.convert(unicodeArray, { to: 'SJIS', from: 'UNICODE' });
 
-                // 3. qrcode-generator でQR生成 (SJISバイナリとして扱う)
-                // type=0(自動), errorCorrectionLevel='M'
+                // 日本製ライブラリでQR生成
                 const qr = qrcode(0, 'M');
                 qr.addData(Encoding.codeToString(sjisBytes), 'Byte'); 
                 qr.make();
 
-                // 4. HTMLとして出力 (セルサイズを8にして大きく表示)
-                container.innerHTML = qr.createImgTag(6);
+                container.innerHTML = qr.createImgTag(6); // サイズ6
 
                 document.getElementById('qrModal').classList.remove('hidden');
                 document.getElementById('qrModal').classList.add('flex');
             } catch (e) {
                 console.error(e);
-                alert("QRコード生成に失敗しました。文字数を減らしてください。");
+                alert("QRコード生成に失敗しました。");
             }
         }
 
