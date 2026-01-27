@@ -71,144 +71,96 @@
         </button>
     </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
+
 <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const key = localStorage.getItem('gemini_api_key');
-            if (key) document.getElementById('apiKeyInput').value = key;
-        });
+    // --- 既存の関数（saveApiKeyなどはそのまま） ---
 
-        function toggleSettings() { document.getElementById('settingsArea').classList.toggle('hidden'); }
-        function saveApiKey() {
-            const key = document.getElementById('apiKeyInput').value.trim();
-            localStorage.setItem('gemini_api_key', key);
-            document.getElementById('settingsArea').classList.add('hidden');
-            alert("APIキーを保存しました");
-        }
+    async function smartSummarize() {
+        const apiKey = localStorage.getItem('gemini_api_key');
+        // 入力時のBOMを徹底除去
+        let text = document.getElementById('rawText').value.replace(/[\uFEFF\u200B\u200C\u200D]/g, '');
+        
+        if (!apiKey || !text) return alert("キーと内容を確認してください");
 
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        let recognition = null;
-        if (SpeechRecognition) {
-            recognition = new SpeechRecognition();
-            recognition.lang = 'ja-JP';
-            recognition.onresult = (e) => { document.getElementById('rawText').value += e.results[0][0].transcript; };
-        }
-        function toggleMic() { recognition && recognition.start(); }
+        const btn = document.getElementById('aiBtn');
+        const status = document.getElementById('statusMsg');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> 整形中...';
 
-        function copyToClipboard() {
-            const text = document.getElementById('summaryText').value;
-            if (!text) return;
-            navigator.clipboard.writeText(text).then(() => { alert("コピーしました！"); });
-        }
+        try {
+            const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+            const listRes = await fetch(listUrl);
+            const listData = await listRes.json();
+            const bestModel = listData.models.find(m => m.name.includes('flash'));
+            const modelName = bestModel ? bestModel.name : "models/gemini-1.5-flash";
+            const genUrl = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`;
 
-        // ▼▼▼ 修正ポイント：強力なクリーニング機能を追加 ▼▼▼
-        async function smartSummarize() {
-            const apiKey = localStorage.getItem('gemini_api_key');
-            // 入力テキストからBOM(\uFEFF)を除去して取得
-            let text = document.getElementById('rawText').value.replace(/\uFEFF/g, '');
-            
-            if (!apiKey || !text) return alert("キーと内容を確認してください");
-
-            const btn = document.getElementById('aiBtn');
-            const status = document.getElementById('statusMsg');
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-circle-notch loading-spin"></i> 整形中...';
-
-            try {
-                const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-                const listRes = await fetch(listUrl);
-                const listData = await listRes.json();
-                const bestModel = listData.models.find(m => m.name.includes('flash') && m.supportedGenerationMethods.includes('generateContent'));
-                const modelName = bestModel ? bestModel.name : "models/gemini-1.5-flash";
-                
-                const genUrl = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`;
-
-                const prompt = `あなたは薬剤師です。次の[音声メモ]を、以下の2点のみの構造で出力してください。挨拶は不要です。
+            const prompt = `あなたは薬剤師です。次の[音声メモ]を、以下の2点のみの構造で出力してください。挨拶や注釈は一切不要です。
 【変更内容】：
 【理由】：
 [音声メモ]: ${text}`;
 
-                const genRes = await fetch(genUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-                });
+            const genRes = await fetch(genUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+            });
 
-                const genData = await genRes.json();
-                if (genData.error) throw new Error(genData.error.message);
+            const genData = await genRes.json();
+            let result = genData.candidates[0].content.parts[0].text;
+            
+            // AIからの回答に含まれるBOMや装飾を除去
+            result = result.replace(/[\uFEFF\u200B\u200C\u200D]/g, '').replace(/```/g, '').trim();
 
-                // AIの回答を取得
-                let result = genData.candidates[0].content.parts[0].text;
-                
-                // ▼▼▼ ここでゴミ(BOMや不要な記号)を徹底除去 ▼▼▼
-                result = result.replace(/\uFEFF/g, ''); // BOMを除去
-                result = result.replace(/```/g, '');    // マークダウンを除去
-                result = result.trim();                 // 前後の空白を除去
-
-                document.getElementById('summaryText').value = result;
-                status.innerText = "作成完了";
-
-            } catch (e) {
-                alert("エラー: " + e.message);
-                status.innerText = "エラー";
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-magic"></i> AIが構造化して要約';
-            }
+            document.getElementById('summaryText').value = result;
+            status.innerText = "作成完了";
+        } catch (e) {
+            alert("エラー: " + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-magic"></i> AIが構造化して要約';
         }
+    }
 
-        // QRコード用のUTF-8変換関数（変更なし）
-        function utf16to8(str) {
-            let out = "", i, len, c;
-            len = str.length;
-            for(i = 0; i < len; i++) {
-                c = str.charCodeAt(i);
-                if ((c >= 0x0001) && (c <= 0x007F)) {
-                    out += str.charAt(i);
-                } else if (c > 0x07FF) {
-                    out += String.fromCharCode(0xE0 | ((c >> 12) & 0x0F));
-                    out += String.fromCharCode(0x80 | ((c >>  6) & 0x3F));
-                    out += String.fromCharCode(0x80 | ((c >>  0) & 0x3F));
-                } else {
-                    out += String.fromCharCode(0xC0 | ((c >>  6) & 0x1F));
-                    out += String.fromCharCode(0x80 | ((c >>  0) & 0x3F));
-                }
-            }
-            return out;
+    // --- ここが今回の肝：Shift-JISでのQRコード生成 ---
+    function generateQR() {
+        const rawText = document.getElementById('summaryText').value.trim();
+        if(!rawText) return alert("内容がありません");
+
+        // 1. BOMや特殊な空白を完全に削除
+        const cleanText = rawText.replace(/[\uFEFF\u200B\u200C\u200D]/g, '');
+
+        // 2. 文字列をShift-JISのバイト配列に変換
+        const unicodeArray = Encoding.stringToCode(cleanText);
+        const sjisBuffer = Encoding.convert(unicodeArray, {
+            to: 'SJIS',
+            from: 'UNICODE'
+        });
+
+        // 3. 変換後のデータをバイナリ文字列として復元
+        const sjisString = sjisBuffer.map(code => String.fromCharCode(code)).join('');
+
+        const container = document.getElementById('qrcode');
+        container.innerHTML = ""; 
+
+        try {
+            new QRCode(container, {
+                text: sjisString, // Shift-JIS化した文字列を渡す
+                width: 256,
+                height: 256,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.M // 密度を少し下げて読み取りやすく
+            });
+
+            document.getElementById('qrModal').classList.remove('hidden');
+            document.getElementById('qrModal').classList.add('flex');
+        } catch (e) {
+            alert("QR生成エラー。文字数が多すぎる可能性があります。");
         }
-
-        function generateQR() {
-            // ここでも念のためBOMを除去して取得
-            let text = document.getElementById('summaryText').value.replace(/\uFEFF/g, '').trim();
-            if(!text) return alert("内容がありません");
-
-            const container = document.getElementById('qrcode');
-            container.innerHTML = ""; 
-
-            try {
-                // QRコード生成時のみ utf16to8 を通す
-                const qrText = utf16to8(text);
-                
-                new QRCode(container, {
-                    text: qrText,
-                    width: 256,
-                    height: 256,
-                    colorDark : "#000000",
-                    colorLight : "#ffffff",
-                    correctLevel : QRCode.CorrectLevel.H 
-                });
-
-                document.getElementById('qrModal').classList.remove('hidden');
-                document.getElementById('qrModal').classList.add('flex');
-            } catch (e) {
-                alert("QRコードの生成中に問題が発生しました。");
-            }
-        }
-
-        function closeQR() { 
-            document.getElementById('qrModal').classList.add('hidden'); 
-            document.getElementById('qrModal').classList.remove('flex');
-        }
-    </script>
+    }
+</script>
 
     <div id="qrModal" class="fixed inset-0 bg-black/80 hidden flex-col items-center justify-center z-50 p-4" onclick="closeQR()">
         <div class="bg-white p-8 rounded-3xl flex flex-col items-center" onclick="event.stopPropagation()">
@@ -219,4 +171,5 @@
     </div>
 </body>
 </html>
+
 
